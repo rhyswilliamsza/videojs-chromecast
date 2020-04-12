@@ -1,22 +1,22 @@
 'use strict';
 
 var ChromecastSessionManager = require('../chromecast/ChromecastSessionManager'),
-    ChromecastTechUI = require('./ChromecastTechUI'),
-    _ = require('underscore'),
-    SESSION_TIMEOUT = 10 * 1000, // milliseconds
-    ChromecastTech;
+   ChromecastTechUI = require('./ChromecastTechUI'),
+   _ = require('underscore'),
+   SESSION_TIMEOUT = 10 * 1000, // milliseconds
+   ChromecastTech;
 
 /**
  * @module ChomecastTech
  */
 
- /**
- * The Video.js Tech class is the base class for classes that provide media playback
- * technology implementations to Video.js such as HTML5, Flash and HLS.
- *
- * @external Tech
- * @see {@link http://docs.videojs.com/Tech.html|Tech}
- */
+/**
+* The Video.js Tech class is the base class for classes that provide media playback
+* technology implementations to Video.js such as HTML5, Flash and HLS.
+*
+* @external Tech
+* @see {@link http://docs.videojs.com/Tech.html|Tech}
+*/
 
 /** @lends ChromecastTech.prototype */
 ChromecastTech = {
@@ -30,7 +30,7 @@ ChromecastTech = {
     * @param options {object} The options to use for configuration
     * @see {@link https://developers.google.com/cast/|Google Cast}
     */
-   constructor: function(options) {
+   constructor: function (options) {
       var subclass;
 
       this._eventListeners = [];
@@ -54,16 +54,35 @@ ChromecastTech = {
       this._hasPlayedAnyItem = false;
       this._requestTitle = options.requestTitleFn || _.noop;
       this._requestSubtitle = options.requestSubtitleFn || _.noop;
+      this._requestCaption = options.requestCaptionFn || _.noop;
       this._requestCustomData = options.requestCustomDataFn || _.noop;
       // See `currentTime` function
       this._initialStartTime = options.startTime || 0;
 
       this._playSource(options.source, this._initialStartTime);
-      this.ready(function() {
+      this.ready(function () {
          this.setMuted(options.muted);
       }.bind(this));
 
-      return subclass;
+      var vm = this;
+      this.textTracks().on("change", function action(event) {
+         vm.syncCaptionStatus(this.tracks_)
+     })
+   },
+
+   syncCaptionStatus: function (tracks) {
+      
+      if (tracks != null) {
+         var showing = tracks.filter(function (track) {
+            return track.kind === "subtitles" && track.mode === "showing"
+         })
+
+         if (showing.length > 0) {
+            this.enableSubtitle(showing);
+         } else {
+            this.disableSubtitle();
+         }
+      }
    },
 
    /**
@@ -73,7 +92,7 @@ ChromecastTech = {
     * @returns {DOMElement}
     * @see {@link http://docs.videojs.com/Tech.html#createEl}
     */
-   createEl: function() {
+   createEl: function () {
       return this._ui.getDOMElement();
    },
 
@@ -83,7 +102,7 @@ ChromecastTech = {
     *
     * @see {@link http://docs.videojs.com/Player.html#play}
     */
-   play: function() {
+   play: function () {
       if (!this.paused()) {
          return;
       }
@@ -101,7 +120,7 @@ ChromecastTech = {
     *
     * @see {@link http://docs.videojs.com/Player.html#pause}
     */
-   pause: function() {
+   pause: function () {
       if (!this.paused() && this._remotePlayer.canPause) {
          this._remotePlayerController.playOrPause();
       }
@@ -114,7 +133,7 @@ ChromecastTech = {
     * @returns {boolean} true if playback is paused
     * @see {@link http://docs.videojs.com/Player.html#paused}
     */
-   paused: function() {
+   paused: function () {
       return this._remotePlayer.isPaused || this.ended() || this._remotePlayer.playerState === null;
    },
 
@@ -125,7 +144,7 @@ ChromecastTech = {
     * @param source {object} the source to store and play
     * @see {@link http://docs.videojs.com/Player.html#src}
     */
-   setSource: function(source) {
+   setSource: function (source) {
       if (this._currentSource && this._currentSource.src === source.src && this._currentSource.type === source.type) {
          // Skip setting the source if the `source` argument is the same as what's already
          // been set. This `setSource` function calls `this._playSource` which sends a
@@ -152,13 +171,14 @@ ChromecastTech = {
     * @param [startTime] The time to start playback at, in seconds
     * @see {@link http://docs.videojs.com/Player.html#src}
     */
-   _playSource: function(source, startTime) {
+   _playSource: function (source, startTime) {
       var castSession = this._getCastSession(),
-          mediaInfo = new chrome.cast.media.MediaInfo(source.src, source.type),
-          title = this._requestTitle(source),
-          subtitle = this._requestSubtitle(source),
-          customData = this._requestCustomData(source),
-          request;
+         mediaInfo = new chrome.cast.media.MediaInfo(source.src, source.type),
+         title = this._requestTitle(source),
+         subtitle = this._requestSubtitle(source),
+         customData = this._requestCustomData(source),
+         captionsObject = this._requestCaption(source),
+         request;
 
       this.trigger('waiting');
       this._clearSessionTimeout();
@@ -170,6 +190,24 @@ ChromecastTech = {
       if (customData) {
          mediaInfo.customData = customData;
       }
+      
+      mediaInfo.streamType = chrome.cast.media.StreamType.BUFFERED;
+      mediaInfo.textTrackStyle = new chrome.cast.media.TextTrackStyle();
+      mediaInfo.textTrackStyle.backgroundColor = "#00000000";
+      mediaInfo.textTrackStyle.foregroundColor = "FFFFFFFF"
+
+      mediaInfo.tracks = []
+      Object.keys(captionsObject).forEach(key => {
+         var englishSubtitle = new chrome.cast.media.Track(parseInt(key), chrome.cast.media.TrackType.TEXT);
+         englishSubtitle.trackContentId = captionsObject[key];
+         englishSubtitle.trackContentType = 'text/vtt';
+         englishSubtitle.subtype = chrome.cast.media.TextTrackType.SUBTITLES;
+         englishSubtitle.name = 'English Subtitles ' + key;
+         englishSubtitle.language = 'en-US';
+         englishSubtitle.customData = null;
+         mediaInfo.tracks.push(englishSubtitle)
+      });
+      console.log("Loaded tracks " + JSON.stringify(mediaInfo.tracks));
 
       this._ui.updateTitle(title);
       this._ui.updateSubtitle(subtitle);
@@ -177,11 +215,13 @@ ChromecastTech = {
       request = new chrome.cast.media.LoadRequest(mediaInfo);
       request.autoplay = true;
       request.currentTime = startTime;
+      request.activeTrackIds = [2]
 
       this._isMediaLoading = true;
       this._hasPlayedCurrentItem = false;
       castSession.loadMedia(request)
-         .then(function() {
+         .then(function (result) {
+            console.log(result)
             if (!this._hasPlayedAnyItem) {
                // `triggerReady` is required here to notify the Video.js player that the
                // Tech has been initialized and is ready.
@@ -205,7 +245,7 @@ ChromecastTech = {
     * @param time {number} the playback time position to jump to
     * @see {@link http://docs.videojs.com/Tech.html#setCurrentTime}
     */
-   setCurrentTime: function(time) {
+   setCurrentTime: function (time) {
       var duration = this.duration();
 
       if (time > duration || !this._remotePlayer.canSeek) {
@@ -225,7 +265,7 @@ ChromecastTech = {
     * @returns {number} the current playback time position
     * @see {@link http://docs.videojs.com/Player.html#currentTime}
     */
-   currentTime: function() {
+   currentTime: function () {
       // There is a brief period of time when Video.js has switched to the chromecast
       // Tech, but chromecast has not yet loaded its first media item. During that time,
       // Video.js calls this `currentTime` function to update its player UI. In that
@@ -246,7 +286,7 @@ ChromecastTech = {
     * @returns {number} the duration of the current media item
     * @see {@link http://docs.videojs.com/Player.html#duration}
     */
-   duration: function() {
+   duration: function () {
       // There is a brief period of time when Video.js has switched to the chromecast
       // Tech, but chromecast has not yet loaded its first media item. During that time,
       // Video.js calls this `duration` function to update its player UI. In that period,
@@ -268,7 +308,7 @@ ChromecastTech = {
     * @returns {boolean} true if the current media item has finished playing
     * @see {@link http://docs.videojs.com/Player.html#ended}
     */
-   ended: function() {
+   ended: function () {
       var mediaSession = this._getMediaSession();
 
       if (!mediaSession && this._hasMediaSessionEnded) {
@@ -284,7 +324,7 @@ ChromecastTech = {
     * @returns {number} the current volume level
     * @see {@link http://docs.videojs.com/Player.html#volume}
     */
-   volume: function() {
+   volume: function () {
       return this._remotePlayer.volumeLevel;
    },
 
@@ -296,7 +336,7 @@ ChromecastTech = {
     * @returns {number} the current volume level
     * @see {@link http://docs.videojs.com/Player.html#volume}
     */
-   setVolume: function(volumeLevel) {
+   setVolume: function (volumeLevel) {
       this._remotePlayer.volumeLevel = volumeLevel;
       this._remotePlayerController.setVolumeLevel();
       // This event is triggered by the listener on
@@ -313,7 +353,7 @@ ChromecastTech = {
     * @returns {boolean} true if the player is currently muted
     * @see {@link http://docs.videojs.com/Player.html#muted}
     */
-   muted: function() {
+   muted: function () {
       return this._remotePlayer.isMuted;
    },
 
@@ -324,7 +364,7 @@ ChromecastTech = {
     * @param isMuted {boolean} whether or not the player should be muted
     * @see {@link http://docs.videojs.com/Html5.html#setMuted} for an example
     */
-   setMuted: function(isMuted) {
+   setMuted: function (isMuted) {
       if ((this._remotePlayer.isMuted && !isMuted) || (!this._remotePlayer.isMuted && isMuted)) {
          this._remotePlayerController.muteOrUnmute();
       }
@@ -336,7 +376,7 @@ ChromecastTech = {
     * @returns {string} URL to the current poster image or `undefined` if none exists
     * @see {@link http://docs.videojs.com/Player.html#poster}
     */
-   poster: function() {
+   poster: function () {
       return this._ui.getPoster();
    },
 
@@ -347,8 +387,30 @@ ChromecastTech = {
     * @param poster {string} the URL to the new poster image
     * @see {@link http://docs.videojs.com/Tech.html#setPoster}
     */
-   setPoster: function(poster) {
+   setPoster: function (poster) {
       this._ui.updatePoster(poster);
+   },
+
+   /**
+    * Sets the remote players subtitle to enabled, based on the loaded track [1]
+    * 
+    */
+   enableSubtitle: function (showing) {
+      var activeTrackIds = []
+      activeTrackIds.push(parseInt(showing[0].label.replace("eng ", "")));
+      console.log("Enabling Chromecast Subtitles: "+ JSON.stringify(activeTrackIds));
+      var tracksInfoRequest = new chrome.cast.media.EditTracksInfoRequest(activeTrackIds);
+      this._getMediaSession().editTracksInfo(tracksInfoRequest);
+   },
+
+   /**
+    * Sets the remote players subtitle to disabled, based removing all loaded tracks
+    * 
+    */
+   disableSubtitle: function () {
+      var activeTrackIds = [];
+      var tracksInfoRequest = new chrome.cast.media.EditTracksInfoRequest(activeTrackIds);
+      this._getMediaSession().editTracksInfo(tracksInfoRequest);
    },
 
    /**
@@ -365,7 +427,7 @@ ChromecastTech = {
     * @returns {undefined} always returns `undefined`
     * @see {@link http://docs.videojs.com/Player.html#buffered}
     */
-   buffered: function() {
+   buffered: function () {
       return undefined;
    },
 
@@ -390,7 +452,7 @@ ChromecastTech = {
     * starts at `0` and ends at the `duration` of the current media item
     * @see {@link http://docs.videojs.com/Player.html#seekable}
     */
-   seekable: function() {
+   seekable: function () {
       // TODO Investigate if there's a way to detect if the source is live, so that we can
       // possibly adjust the seekable `TimeRanges` accordingly.
       return this.videojs.createTimeRange(0, this.duration());
@@ -403,7 +465,7 @@ ChromecastTech = {
     * @returns {boolean} always returns `false`
     * @see {@link http://docs.videojs.com/Html5.html#controls} for an example
     */
-   controls: function() {
+   controls: function () {
       return false;
    },
 
@@ -415,7 +477,7 @@ ChromecastTech = {
     * @returns {boolean} always returns `true`
     * @see {@link http://docs.videojs.com/Html5.html#playsinline} for an example
     */
-   playsinline: function() {
+   playsinline: function () {
       return true;
    },
 
@@ -426,7 +488,7 @@ ChromecastTech = {
     * @returns {boolean} always returns `true`
     * @see {@link http://docs.videojs.com/Html5.html#supportsFullScreen} for an example
     */
-   supportsFullScreen: function() {
+   supportsFullScreen: function () {
       return true;
    },
 
@@ -437,7 +499,7 @@ ChromecastTech = {
     *
     * @see {@link http://docs.videojs.com/Html5.html#setAutoplay} for an example
     */
-   setAutoplay: function() {
+   setAutoplay: function () {
       // Not supported
    },
 
@@ -445,7 +507,7 @@ ChromecastTech = {
     * @returns {number} the chromecast player's playback rate, if available. Otherwise,
     * the return value defaults to `1`.
     */
-   playbackRate: function() {
+   playbackRate: function () {
       var mediaSession = this._getMediaSession();
 
       return mediaSession ? mediaSession.playbackRate : 1;
@@ -454,7 +516,7 @@ ChromecastTech = {
    /**
     * Does nothing. Changing the playback rate is not supported.
     */
-   setPlaybackRate: function() {
+   setPlaybackRate: function () {
       // Not supported
    },
 
@@ -463,7 +525,7 @@ ChromecastTech = {
     * ChromecastTech because setting the source on the `Chromecast` automatically causes
     * it to begin loading.
     */
-   load: function() {
+   load: function () {
       // Not supported
    },
 
@@ -472,7 +534,7 @@ ChromecastTech = {
     *
     * @see https://developer.mozilla.org/en-US/docs/Web/API/HTMLMediaElement/readyState
     */
-   readyState: function() {
+   readyState: function () {
       if (this._remotePlayer.playerState === 'IDLE' || this._remotePlayer.playerState === 'BUFFERING') {
          return 0; // HAVE_NOTHING
       }
@@ -486,7 +548,7 @@ ChromecastTech = {
     *
     * @private
     */
-   _listenToPlayerControllerEvents: function() {
+   _listenToPlayerControllerEvents: function () {
       var eventTypes = cast.framework.RemotePlayerEventType;
 
       this._addEventListener(this._remotePlayerController, eventTypes.PLAYER_STATE_CHANGED, this._onPlayerStateChanged, this);
@@ -511,7 +573,7 @@ ChromecastTech = {
     * @param context {object} the `this` context to use when executing the `callback`
     * @private
     */
-   _addEventListener: function(target, type, callback, context) {
+   _addEventListener: function (target, type, callback, context) {
       var listener;
 
       listener = {
@@ -532,7 +594,7 @@ ChromecastTech = {
     *
     * @private
     */
-   _removeAllEventListeners: function() {
+   _removeAllEventListeners: function () {
       while (this._eventListeners.length > 0) {
          this._removeEventListener(this._eventListeners[0]);
       }
@@ -546,12 +608,12 @@ ChromecastTech = {
     *
     * @private
     */
-   _removeEventListener: function(listener) {
+   _removeEventListener: function (listener) {
       var index;
 
       listener.target.removeEventListener(listener.type, listener.listener);
 
-      index = _.findIndex(this._eventListeners, function(registeredListener) {
+      index = _.findIndex(this._eventListeners, function (registeredListener) {
          return registeredListener.target === listener.target &&
             registeredListener.type === listener.type &&
             registeredListener.callback === listener.callback &&
@@ -569,9 +631,9 @@ ChromecastTech = {
     *
     * @private
     */
-   _onPlayerStateChanged: function() {
+   _onPlayerStateChanged: function () {
       var states = chrome.cast.media.PlayerState,
-          playerState = this._remotePlayer.playerState;
+         playerState = this._remotePlayer.playerState;
 
       if (playerState === states.PLAYING) {
          this._hasPlayedCurrentItem = true;
@@ -598,7 +660,7 @@ ChromecastTech = {
     *
     * @private
     */
-   _onMediaSessionStatusChanged: function(isAlive) {
+   _onMediaSessionStatusChanged: function (isAlive) {
       this._hasMediaSessionEnded = !!isAlive;
    },
 
@@ -613,10 +675,10 @@ ChromecastTech = {
     *
     * @private
     */
-   _closeSessionOnTimeout: function() {
+   _closeSessionOnTimeout: function () {
       // Ensure that there's never more than one session timeout active
       this._clearSessionTimeout();
-      this._sessionTimeoutID = setTimeout(function() {
+      this._sessionTimeoutID = setTimeout(function () {
          var castSession = this._getCastSession();
 
          if (castSession) {
@@ -633,7 +695,7 @@ ChromecastTech = {
     * @private
     * @see _closeSessionOnTimeout
     */
-   _clearSessionTimeout: function() {
+   _clearSessionTimeout: function () {
       if (this._sessionTimeoutID) {
          clearTimeout(this._sessionTimeoutID);
          this._sessionTimeoutID = false;
@@ -644,7 +706,7 @@ ChromecastTech = {
     * @private
     * @return {object} the current CastContext, if one exists
     */
-   _getCastContext: function() {
+   _getCastContext: function () {
       return this._chromecastSessionManager.getCastContext();
    },
 
@@ -652,7 +714,7 @@ ChromecastTech = {
     * @private
     * @return {object} the current CastSession, if one exists
     */
-   _getCastSession: function() {
+   _getCastSession: function () {
       return this._getCastContext().getCurrentSession();
    },
 
@@ -661,7 +723,7 @@ ChromecastTech = {
     * @return {object} the current MediaSession, if one exists
     * @see https://developers.google.com/cast/docs/reference/chrome/chrome.cast.media.Media
     */
-   _getMediaSession: function() {
+   _getMediaSession: function () {
       var castSession = this._getCastSession();
 
       return castSession ? castSession.getMediaSession() : null;
@@ -672,7 +734,7 @@ ChromecastTech = {
     * @private
     * @see http://docs.videojs.com/Player.html#event:volumechange
     */
-   _triggerVolumeChangeEvent: function() {
+   _triggerVolumeChangeEvent: function () {
       this.trigger('volumechange');
    },
 
@@ -681,7 +743,7 @@ ChromecastTech = {
     * @private
     * @see http://docs.videojs.com/Player.html#event:timeupdate
     */
-   _triggerTimeUpdateEvent: function() {
+   _triggerTimeUpdateEvent: function () {
       this.trigger('timeupdate');
    },
 
@@ -690,7 +752,7 @@ ChromecastTech = {
     * @private
     * @see http://docs.videojs.com/Player.html#event:durationchange
     */
-   _triggerDurationChangeEvent: function() {
+   _triggerDurationChangeEvent: function () {
       this.trigger('durationchange');
    },
 
@@ -699,7 +761,7 @@ ChromecastTech = {
     * @private
     * @see http://docs.videojs.com/Player.html#event:error
     */
-   _triggerErrorEvent: function() {
+   _triggerErrorEvent: function () {
       this.trigger('error');
    },
 };
@@ -718,9 +780,9 @@ ChromecastTech = {
  * {@link http://docs.videojs.com/module-videojs.html|Video.js}
  * @see http://docs.videojs.com/Tech.html#.registerTech
  */
-module.exports = function(videojs) {
+module.exports = function (videojs) {
    var Tech = videojs.getComponent('Tech'),
-       ChromecastTechImpl;
+      ChromecastTechImpl;
 
    ChromecastTechImpl = videojs.extend(Tech, ChromecastTech);
 

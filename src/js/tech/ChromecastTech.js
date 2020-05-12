@@ -215,7 +215,6 @@ ChromecastTech = {
       request = new chrome.cast.media.LoadRequest(mediaInfo);
       request.autoplay = true;
       request.currentTime = startTime;
-      request.activeTrackIds = [2]
 
       this._isMediaLoading = true;
       this._hasPlayedCurrentItem = false;

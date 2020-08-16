@@ -122,7 +122,7 @@ ChromecastTech = {
     */
    pause: function () {
       if (!this.paused() && this._remotePlayer.canPause) {
-         this._remotePlayerController.playOrPause();
+         // this._remotePlayerController.playOrPause();
       }
    },
 
@@ -220,7 +220,6 @@ ChromecastTech = {
       this._hasPlayedCurrentItem = false;
       castSession.loadMedia(request)
          .then(function (result) {
-            console.log(result)
             if (!this._hasPlayedAnyItem) {
                // `triggerReady` is required here to notify the Video.js player that the
                // Tech has been initialized and is ready.
@@ -337,7 +336,7 @@ ChromecastTech = {
     */
    setVolume: function (volumeLevel) {
       this._remotePlayer.volumeLevel = volumeLevel;
-      this._remotePlayerController.setVolumeLevel();
+      // this._remotePlayerController.setVolumeLevel();
       // This event is triggered by the listener on
       // `RemotePlayerEventType.VOLUME_LEVEL_CHANGED`, but waiting for that event to fire
       // in response to calls to `setVolume` introduces noticeable lag in the updating of
